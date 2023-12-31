@@ -4,66 +4,101 @@ using UnityEngine.Rendering;
 
 public class CustomSrp : RenderPipeline
 {
-	protected override void Render(ScriptableRenderContext context, Camera[] cameras)
-	{
-		const int msaaSamples = 4;
-		QualitySettings.antiAliasing = 0;
+    public CustomSrpSettings Settings;
 
-		foreach (Camera camera in cameras)
-		{
-			if (!camera.TryGetCullingParameters(out ScriptableCullingParameters cullingParameters))
-			{
-				continue;
-			}
+    public CustomSrp(CustomSrpSettings settings) => Settings = settings;
 
-			CullingResults cullingResults = context.Cull(ref cullingParameters);
+    protected override void Render(ScriptableRenderContext context, Camera[] cameras)
+    {
+        QualitySettings.antiAliasing = 0;
 
-			context.SetupCameraProperties(camera);
+        foreach (Camera camera in cameras)
+        {
+            if (!camera.TryGetCullingParameters(out ScriptableCullingParameters cullingParameters))
+            {
+                continue;
+            }
 
-			{
-				CommandBuffer cmd = CommandBufferPool.Get();
+            if (camera.cameraType != CameraType.Game)
+            {
+                continue;
+            }
 
-				cmd.SetRenderTarget(BuiltinRenderTextureType.CameraTarget, RenderBufferLoadAction.DontCare,
-					RenderBufferStoreAction.Store
-				);
-				cmd.ClearRenderTarget(false, true, Color.magenta);
-				context.ExecuteCommandBuffer(cmd);
+            RenderCamera(camera, ref context, ref cullingParameters);
+        }
+    }
 
-				CommandBufferPool.Release(cmd);
-			}
+    private void RenderCamera(Camera camera,
+        ref ScriptableRenderContext context,
+        ref ScriptableCullingParameters cullingParameters)
+    {
+        int cameraPixelWidth = camera.pixelWidth;
+        int cameraPixelHeight = camera.pixelHeight;
+
+        var renderTextureDescriptor =
+            new RenderTextureDescriptor(cameraPixelWidth, cameraPixelHeight, RenderTextureFormat.Default)
+            {
+                msaaSamples = (int) Settings.MsaaSamples,
+            };
+        int msaaSamples = SystemInfo.GetRenderTextureSupportedMSAASampleCount(renderTextureDescriptor);
+
+        CullingResults cullingResults = context.Cull(ref cullingParameters);
+
+        context.SetupCameraProperties(camera);
+
+        {
+            CommandBuffer cmd = CommandBufferPool.Get();
+
+            cmd.SetRenderTarget(BuiltinRenderTextureType.CameraTarget, RenderBufferLoadAction.DontCare,
+                RenderBufferStoreAction.Store
+            );
+            cmd.ClearRenderTarget(false, true, Color.magenta);
+            context.ExecuteCommandBuffer(cmd);
+
+            CommandBufferPool.Release(cmd);
+        }
 
 
-			var attachmentDescriptors = new NativeArray<AttachmentDescriptor>(2, Allocator.Temp);
-			var colorAttachmentDescriptor = new AttachmentDescriptor(RenderTextureFormat.Default)
-			{
-				loadAction = RenderBufferLoadAction.DontCare,
-				storeAction = RenderBufferStoreAction.Resolve,
-				resolveTarget = BuiltinRenderTextureType.CameraTarget,
-			};
-			var depthAttachmentDescriptor = new AttachmentDescriptor(RenderTextureFormat.Depth)
-			{
-				loadAction = RenderBufferLoadAction.Clear,
-				storeAction = RenderBufferStoreAction.DontCare,
-			};
+        var attachmentDescriptors = new NativeArray<AttachmentDescriptor>(2, Allocator.Temp);
+        var colorAttachmentDescriptor = new AttachmentDescriptor(RenderTextureFormat.Default)
+        {
+            loadAction = RenderBufferLoadAction.DontCare,
+        };
 
-			attachmentDescriptors[0] = colorAttachmentDescriptor;
-			attachmentDescriptors[1] = depthAttachmentDescriptor;
-			context.BeginRenderPass(camera.pixelWidth, camera.pixelHeight, msaaSamples, attachmentDescriptors, 1);
+        if (msaaSamples > 1)
+        {
+            colorAttachmentDescriptor.storeAction = RenderBufferStoreAction.Resolve;
+            colorAttachmentDescriptor.resolveTarget = BuiltinRenderTextureType.CameraTarget;
+        }
+        else
+        {
+            colorAttachmentDescriptor.storeAction = RenderBufferStoreAction.Store;
+            colorAttachmentDescriptor.loadStoreTarget = BuiltinRenderTextureType.CameraTarget;
+        }
 
-			var colorIndices = new NativeArray<int>(1, Allocator.Temp);
-			colorIndices[0] = 0;
-			context.BeginSubPass(colorIndices, false, false);
+        var depthAttachmentDescriptor = new AttachmentDescriptor(RenderTextureFormat.Depth)
+        {
+            loadAction = RenderBufferLoadAction.Clear,
+            storeAction = RenderBufferStoreAction.DontCare,
+        };
 
-			context.DrawSkybox(camera);
+        attachmentDescriptors[0] = colorAttachmentDescriptor;
+        attachmentDescriptors[1] = depthAttachmentDescriptor;
+        context.BeginRenderPass(cameraPixelWidth, cameraPixelHeight, msaaSamples, attachmentDescriptors, 1);
 
-			var drawingSettings = new DrawingSettings(new ShaderTagId("SRPDefaultUnlit"), new SortingSettings(camera));
-			FilteringSettings filteringSettings = FilteringSettings.defaultValue;
-			context.DrawRenderers(cullingResults, ref drawingSettings, ref filteringSettings);
+        var colorIndices = new NativeArray<int>(1, Allocator.Temp);
+        colorIndices[0] = 0;
+        context.BeginSubPass(colorIndices, false, false);
 
-			context.EndSubPass();
-			context.EndRenderPass();
+        context.DrawSkybox(camera);
 
-			context.Submit();
-		}
-	}
+        var drawingSettings = new DrawingSettings(new ShaderTagId("SRPDefaultUnlit"), new SortingSettings(camera));
+        FilteringSettings filteringSettings = FilteringSettings.defaultValue;
+        context.DrawRenderers(cullingResults, ref drawingSettings, ref filteringSettings);
+
+        context.EndSubPass();
+        context.EndRenderPass();
+
+        context.Submit();
+    }
 }

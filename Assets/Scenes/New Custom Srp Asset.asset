@@ -12,3 +12,5 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: efea720ab51d499c8d58d2f95ae6b165, type: 3}
   m_Name: New Custom Srp Asset
   m_EditorClassIdentifier: 
+  Settings:
+    MsaaSamples: 4
